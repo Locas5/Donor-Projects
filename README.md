@@ -1,9 +1,10 @@
 # Donor-Projects
 This project was created as a final term project of Business Analytics & Machine Learning course. 
 The project includes the folowing files:
-1. A readme file with description. 
+1. A readme file named "final markdown.rmd" for an overview description. 
 2. A RMD file containing the main codes and partial illustrations of this project.
 3. An image showing the formula of profit measure
+4. A pdf file 
 
 ## Project Description
 In 1997, the Paralyzed Veterans of America (PVA) used a direct mailing to appeal to “lapsed” donors. Here is a brief summary of the numbers. On the Valuation data set:
