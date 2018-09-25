@@ -1,0 +1,489 @@
+---
+title: "Final Project"
+author: "Ang Chen"
+date: "2018Äê5ÔÂ9ÈÕ"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#1. BASIC SETUP
+Given the description, I decided to make a logstic regression model to solbe the problem.
+In the basic setup section, we would choose influencing features and the indicate the labels
+from the dataset provided.
+
+## Variable selection
+Using the cup98dic.txt provided, we chose 10 features: 
+RFA_2R                      Recency code for RFA_2                  
+RFA_2F                      Frequency code for RFA_2                 
+RFA_2A                      Donation Amount code for RFA_2
+HOMEOWNR                    Home Owner Flag
+                            H = Home owner 
+                            U = Unknown
+CLUSTER                     CLUSTER
+                            Code indicating which cluster group the donor falls into.  
+                            Each cluster is unique in terms of socio-economic status, 
+                            urbanicty, ethnicity and a variety of other demographic 
+                            characteristics. A nominal or symbolic field.
+INCOME                      HOUSEHOLD INCOME
+GENDER                      Gender
+                            M = Male
+                            F = Female
+                            U = Unknown
+                            J = Joint Account, unknown gender
+STATE                       State abbreviation (a nominal/symbolic field)
+DATASRCE                    Source of Overlay Data
+                            Indicates which third-party data source the donor 
+                            matched against
+                            1 = MetroMail
+                            2 = Polk
+                            3 = Both
+VETERANS                    VETERANS (Y/N)
+
+##Target Variable Selection
+We selected the label TARGET_B indicating whether the response is positive or negtive.
+TARGET_B                    Target Variable: Binary Indicator for Response to 
+                            97NK Mailing
+
+
+# Model Building
+We are going to build a logistic regression model in this section to classify whether 
+the receive will be a donor. The steps are as below.
+
+## Libraries Installation
+Running this code should pretty much cover all the technique we need for the model.
+```{r}
+library(data.table)
+library(ggplot2)
+library(mice)
+library(VIM)
+library(mlbench)
+library(caret)
+library(gmodels)
+library(vcd)
+library(vcdExtra)
+library(ca)
+library(MASS)
+library(formatR)
+library(tidyr)
+library(tibble)
+library(dplyr)
+library(stringr)
+library(haven)
+```
+
+## Loading Data
+First we would want to load the data
+```{r}
+#Fist we define a dataset containing all the data we need
+rawdataset <- read.csv("C:/Users/Administrator/Desktop/BUS 5420/final project/cup98LRN.txt")
+rawdataset <- rawdataset[c("RFA_2R", "RFA_2F", "RFA_2A",  "HOMEOWNR", "CLUSTER", "GENDER", "INCOME", "STATE", "DATASRCE", "VETERANS", "TARGET_B")]
+head(rawdataset)
+```
+
+## Data Cleaning
+From loading the data, some white-spaces are found. We need to transform the white-spaces into NA while looking for other problems.
+```{r}
+str(rawdataset)  #see if there is any problems with the datatype
+head(rawdataset)  #see the first few rows of data
+summary(rawdataset)  # overview the dataset
+```
+According to the results, the datatypes all seem to be reasonable.
+However, it is found that there indeed are some nuls and white spaces, 
+which we need to fix.
+
+### Dealing with white spaces
+We need to convert white spaces into NA type. It is as following.
+```{r}
+#notice the blanks
+rawdataset$HOMEOWNR[1:10]
+
+#Found some empty. Use mutate to change blanks into NAs
+t_df <- rawdataset %>% mutate_all(str_trim)  # first, str and trim data
+rna_df <- t_df %>% mutate_all(zap_empty)  # fill in the blanks with NAs
+
+rna_df$HOMEOWNR[1:10]
+str(rna_df)
+```
+### Change Data type
+Due to the white-space filling, the data types have been changed into character type. Thus, we need to modify the data types to correct forms. (All factor type in this case)
+```{r}
+# assiagn datatype "factor"
+typed_df <- rna_df %>% mutate_if(is.character, as.factor)
+
+summary(typed_df)
+str(typed_df)
+```
+
+### Dealing with missing data
+From the summary of dataset, we found that there are a lot of NAs. Now we are going to visualize these NAs and use corresponding treatment.
+```{r}
+# Visualize the NAs
+library(mice)
+library(VIM)
+md.pattern(typed_df)  # Display missing data patterns
+mice_plot<-aggr(typed_df,col=c('navyblue','yellow'),combined=FALSE,numbers=TRUE,
+                sortVars=TRUE,labels=names(typed_df),cex.axis=.7,
+                gap=3,ylab=c("Missing data","Pattern"))
+```
+From the visualization, we can see that the "VETERANS" column has the most NAs. The NAs represent non-veterans, which means we exchange the NA with Ns. 
+```{r}
+fixed_df <- typed_df
+fixed_df$VETERANS <- as.character(fixed_df$VETERANS) # we need to transfer datatype to char
+str(fixed_df)
+fixed_df[is.na(fixed_df$VETERANS), "VETERANS"] <- "N" # set all NA as "N"
+fixed_df$VETERANS <- as.factor(fixed_df$VETERANS) # Transfer back to factor type
+
+summary(fixed_df) # check
+```
+Although we fixed the missing value of VETERAN, there are still some NAs. However, the numbers of the remaining are still a lot. Thus, we just need to remove all rows with NA and see how much is remianed.
+```{r}
+#Remove rows with NAs.
+clean_df<-na.omit(fixed_df)
+
+mice_plot<-aggr(clean_df,col=c('navyblue','yellow'),combined=FALSE,numbers=TRUE,
+                sortVars=TRUE,labels=names(typed_df),cex.axis=.7,
+                gap=3,ylab=c("Missing data","Pattern")) # see how much is remaining
+```
+
+
+## Create training and validation data set
+We want to know the quality of our model. Thus, we would isolate a part of the data
+from the dataset and use it as a validation data set.
+In this project, we would use 80% of the data as learning dataset and 20% as validation 
+dataset.
+```{r}
+library(caret)
+'%ni%' <- Negate('%in%')  # define 'not in' func
+options(scipen=999)  # prevents printing scientific notations.
+
+#Create an index seperating the original dataset at 80%
+validation_index <- createDataPartition(clean_df$TARGET_B, p=0.8, list=FALSE)
+#Create a training dataset using 80% of the original dataset
+trainData <- clean_df[validation_index,]
+#Create a validation dataset using 20% of the original dataset
+validationData <- clean_df[-validation_index,]
+
+
+#How balanced is the seperation?
+table(trainData$TARGET_B)
+```
+From the result above, we can see there are 2859 donors with 54428 non-donors. 
+Thus, we may need to balance the ratio. Which is to say, we need to reduce the sample size of non-donors.
+```{r}
+set.seed(100)
+
+#make the training dataset balanced
+down_train <- downSample(x = trainData[, colnames(trainData) %ni% "TARGET_B"],
+                         y = trainData$TARGET_B) 
+
+str(down_train)
+table(down_train$Class)
+summary(down_train)
+```
+Now we have equal number of donors.
+
+## Independence and Association
+
+
+### Independence
+With the data prepared, now we want to see whether our target variable is dependent on the independent variables we selected. Below is the code:
+```{r}
+# Conduct Chi-squared test for RFA_2R
+  # Create a data frame from the main data set.
+chi.data <- data.frame(down_train$RFA_2R, down_train$Class)
+
+# Create a table with the needed variables.
+chi.data = table(down_train$RFA_2R, down_train$Class)
+print(chi.data)
+
+# Perform the Chi-Square test.
+chisq.test(chi.data)
+  
+
+# This table gives us chi square with p value of 0.035 which means that it is reasonable to reject independence and say gender and party have a dependency.
+```
+
+```{r}
+# Conduct Chi-squared test for RFA_2F
+  # Create a data frame from the main data set.
+chi.data <- data.frame(down_train$RFA_2F, down_train$Class)
+
+# Create a table with the needed variables.
+chi.data = table(down_train$RFA_2F, down_train$Class)
+print(chi.data)
+
+# Perform the Chi-Square test.
+chisq.test(chi.data)
+  
+
+# This table gives us chi square with p value of 0.035 which means that it is reasonable to reject independence and say gender and party have a dependency.
+
+
+
+```
+
+```{r}
+# Conduct Chi-squared test for RFA_2A
+  # Create a data frame from the main data set.
+chi.data <- data.frame(down_train$RFA_2A, down_train$Class)
+
+# Create a table with the needed variables.
+chi.data = table(down_train$RFA_2A, down_train$Class)
+print(chi.data)
+
+# Perform the Chi-Square test.
+chisq.test(chi.data)
+  
+
+# This table gives us chi square with p value of 0.035 which means that it is reasonable to reject independence and say gender and party have a dependency.
+```
+
+```{r}
+# Conduct Chi-squared test for HOMEOWNR
+  # Create a data frame from the main data set.
+chi.data <- data.frame(down_train$HOMEOWNR, down_train$Class)
+
+# Create a table with the needed variables.
+chi.data = table(down_train$HOMEOWNR, down_train$Class)
+print(chi.data)
+
+# Perform the Chi-Square test.
+chisq.test(chi.data)
+  
+
+# This table gives us chi square with p value of 0.035 which means that it is reasonable to reject independence and say gender and party have a dependency.
+```
+
+```{r}
+# Conduct Chi-squared test for CLUSTER
+  # Create a data frame from the main data set.
+chi.data <- data.frame(down_train$CLUSTER, down_train$Class)
+
+# Create a table with the needed variables.
+chi.data = table(down_train$CLUSTER, down_train$Class)
+print(chi.data)
+
+# Perform the Chi-Square test.
+chisq.test(chi.data)
+  
+
+# This table gives us chi square with p value of 0.035 which means that it is reasonable to reject independence and say gender and party have a dependency.
+```
+
+```{r}
+# Conduct Chi-squared test for GENDER
+  # Create a data frame from the main data set.
+chi.data <- data.frame(down_train$GENDER, down_train$Class)
+
+# Create a table with the needed variables.
+chi.data = table(down_train$GENDER, down_train$Class)
+print(chi.data)
+
+# Perform the Chi-Square test.
+chisq.test(chi.data)
+  
+
+```
+
+```{r}
+# Conduct Chi-squared test for INCOME
+  # Create a data frame from the main data set.
+chi.data <- data.frame(down_train$INCOME, down_train$Class)
+
+# Create a table with the needed variables.
+chi.data = table(down_train$INCOME, down_train$Class)
+print(chi.data)
+
+# Perform the Chi-Square test.
+chisq.test(chi.data)
+  
+```
+
+```{r}
+# Conduct Chi-squared test for STATE
+  # Create a data frame from the main data set.
+chi.data <- data.frame(down_train$STATE, down_train$Class)
+
+# Create a table with the needed variables.
+chi.data = table(down_train$STATE, down_train$Class)
+print(chi.data)
+
+# Perform the Chi-Square test.
+chisq.test(chi.data)
+  
+
+# This table gives us chi square with p value of 0.035 which means that it is reasonable to reject independence and say gender and party have a dependency.
+```
+
+```{r}
+# Conduct Chi-squared test for DATASRCE
+  # Create a data frame from the main data set.
+chi.data <- data.frame(down_train$DATASRCE, down_train$Class)
+
+# Create a table with the needed variables.
+chi.data = table(down_train$DATASRCE, down_train$Class)
+print(chi.data)
+
+# Perform the Chi-Square test.
+chisq.test(chi.data)
+  
+
+# This table gives us chi square with p value of 0.035 which means that it is reasonable to reject independence and say gender and party have a dependency.
+```
+
+```{r}
+# Conduct Chi-squared test for VETERANS
+  # Create a data frame from the main data set.
+chi.data <- data.frame(down_train$VETERANS, down_train$Class)
+
+# Create a table with the needed variables.
+chi.data = table(down_train$VETERANS, down_train$Class)
+print(chi.data)
+
+# Perform the Chi-Square test.
+chisq.test(chi.data)
+  
+
+# This table gives us chi square with p value of 0.035 which means that it is reasonable to reject independence and say gender and party have a dependency.
+```
+The chi-squared tests for each features are shown above. The results show that most variables are relevent(p-value<0.05) with classification of donors. However, a few features failed to give a chi-squared result, which are RFA_2R(Recency code for RFA_2 ), GENDER, and STATE. RFA_2R failed the test because it has only 1 factor. Thus, RFA_2R variable should be excluded from the model. GENDER and STATE failed the test because of mathematical reason---we can`t have frequency of 0`s. 
+Using GENDER as an example, the frequency for catagory C is 0, which makes a mathematical mistake. And the same happens to STATE.
+
+       0    1
+  C    0    0
+  F 1546 1523
+  J    9    8
+  M 1235 1283
+  U   69   45
+Chi-squared approximation may be incorrect
+	Pearson's Chi-squared test
+
+data:  chi.data
+X-squared = NaN, df = 4, p-value = NA
+
+It would be more efficient to prove the dependency using other tests. So we will discuss these two factors in sections below.
+
+### Other Dependency Test 
+#### Crosstable
+Crosstable shows the contribution of chi squared by each cell. 
+```{r}
+library(gmodels)
+#This is a Crosstable for GENDER
+  # Create a data frame from the main data set.
+chi.data <- data.frame(down_train$GENDER, down_train$Class)
+
+# Create a table with the needed variables.
+chi.data = table(down_train$GENDER, down_train$Class)
+print(chi.data)
+
+# Use CrossTable
+CrossTable(chi.data,prop.t=FALSE,prop.r=FALSE,prop.c=FALSE)
+```
+Using the Chi-squared table, we found that the only F(FEMALE) shows a significant relevance with the donor classification. However, we may still keep it to see how it fit in our regression model.
+
+
+```{r}
+library(gmodels)
+#This is a Crosstable for STATE
+  # Create a data frame from the main data set.
+chi.data <- data.frame(down_train$STATE, down_train$Class)
+
+# Create a table with the needed variables.
+chi.data = table(down_train$STATE, down_train$Class)
+print(chi.data)
+
+# Use CrossTable
+CrossTable(chi.data,prop.t=FALSE,prop.r=FALSE,prop.c=FALSE)
+```
+From the result, we found that most STATES are not significantly different in deciding the donor classification. However, we may still keep it to see how it fit in our regression model.
+
+## Logistic Regression
+In this section, we will use GLM metrics to the model. Then we will evaluate the accuracy of the model. 
+```{r}
+# Build the logistic regression model
+logitmod <- glm(Class ~RFA_2F+RFA_2A+HOMEOWNR+CLUSTER+INCOME, family = "binomial", data=down_train)
+
+# Predict on testData
+pred <- predict(logitmod, newdata = validationData, type = "response")
+
+# Cut off probability of 0.5
+y_pred <- ifelse(pred > 0.5, 1, 0)
+y_act <- validationData$TARGET_B
+
+# Transform to factor info
+y_pred<-factor(y_pred)
+y_act<-factor(y_act)
+
+library(caret)
+caret::confusionMatrix(y_pred, y_act,
+                       positive="1", mode="everything")
+```
+From the results above, the best accuracy we can get is 75.23%. Next, we are going to try a few other models.
+```{r}
+# Run algorithms using 10-fold cross validation
+
+control <- trainControl(method="cv", number=10)
+
+metric <- "Accuracy"
+```
+
+
+```{r}
+# a) linear algorithms
+
+set.seed(7)
+
+fit.lda <- train(Class~RFA_2F+RFA_2A+HOMEOWNR+CLUSTER+INCOME, data=down_train, method="lda", metric=metric, trControl=control)
+
+# b) nonlinear algorithms
+
+# CART
+
+set.seed(7)
+
+fit.cart <- train(Class~RFA_2F+RFA_2A+HOMEOWNR+CLUSTER+INCOME, data=down_train, method="rpart", metric=metric, trControl=control)
+
+# kNN
+
+set.seed(7)
+
+fit.knn <- train(Class~RFA_2F+RFA_2A+HOMEOWNR+CLUSTER+INCOME, data=down_train, method="knn", metric=metric, trControl=control)
+
+# c) advanced algorithms
+
+# SVM
+
+set.seed(7)
+
+fit.svm <- train(Class~RFA_2F+RFA_2A+HOMEOWNR+CLUSTER+INCOME, data=down_train, method="svmRadial", metric=metric, trControl=control)
+
+
+```
+
+Now we can check the accuracy of each model and compare.
+```{r}
+# summarize accuracy of models for with-in accuracy
+
+results <- resamples(list(lda=fit.lda, cart=fit.cart, knn=fit.knn, svm=fit.svm))
+
+summary(results)
+```
+
+```{r}
+# Visualize and compare accuracy of models
+
+dotplot(results)
+```
+### Best Model
+Now we can see that the KNN model has best primary mean accuracy of 69.43%. Now we can have the model tested on the validation dataset.
+```{r}
+# estimate skill of LDA on the validation dataset
+
+predictions <- predict(fit.svm, validationData)
+
+confusionMatrix(predictions, validationData$TARGET_B)
+```
+We can see that KNN model has better accuracy 78.95%, which is higher than GLM model of 75%. Thus, we can use the KNN model to make predictions of donors.
+
