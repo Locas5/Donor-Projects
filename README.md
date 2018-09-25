@@ -1,5 +1,6 @@
 # Donor-Projects
-The files of this project includes:
+This project was created as a final term project of Business Analytics & Machine Learning course. 
+The project includes the folowing files:
 1. A readme file with description. 
 2. A RMD file containing the main codes and partial illustrations of this project.
 3. An image showing the formula of profit measure
