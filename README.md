@@ -15,7 +15,7 @@ This totaled $65,280.
 The total amount of donation: $76,100
 Hence, the profit: $10,560.
 
-**Question: How can we target a smaller group and yet produce greater profit?
+**Question: How can we target a smaller group and yet produce greater profit?**
 
 
 ## Profit Measure
